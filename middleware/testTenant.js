@@ -1,7 +1,7 @@
 const { db } = require("../config/database");
 
 async function tenantMiddleware(req, res, next) {
-  const slug = req.headers["x-tenant-slug"];
+  const slug = String(req.headers["x-tenant-slug"] || "").trim();
 
   if (!slug) {
     return res.status(400).json({ message: "Tenant slug required" });

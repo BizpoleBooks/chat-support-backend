@@ -26,10 +26,12 @@ normal
     tenantId,
     question: prompt + "\n\nMessage: " + message,
     context: "",
-    history: []
+    history: [],
+    restrictToKnowledge: false
   });
 
-  return result.trim().toLowerCase();
+  // Tolerate stray punctuation/whitespace around the label, but nothing else
+  return result.toLowerCase().replace(/[^a-z_]/g, "") === "raise_ticket" ? "raise_ticket" : "normal";
 }
 
 module.exports = { detectTicketIntent };

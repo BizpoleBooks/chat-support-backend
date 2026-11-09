@@ -1,13 +1,10 @@
 const { db } = require("../config/database");
 
 
-// 🔎 SEARCH
-async function searchKnowledge(query, tenantId) {
-  if (!query || !tenantId) return [];
-
+async function matchKnowledge(query, tenantId, mode) {
   const [rows] = await db.query(
     `
-    SELECT 
+    SELECT
       k.id,
       k.title,
       k.content,
@@ -15,17 +12,42 @@ async function searchKnowledge(query, tenantId) {
       f.file_url,
       f.file_type,
       f.file_name,
-      MATCH(k.title, k.content) AGAINST(? IN NATURAL LANGUAGE MODE) AS score
+      MATCH(k.title, k.content) AGAINST(? IN ${mode} MODE) AS score
     FROM knowledge_base k
-    LEFT JOIN knowledge_files f 
+    LEFT JOIN knowledge_files f
       ON k.id = f.knowledge_id
     WHERE k.tenant_id = ?
-      AND MATCH(k.title, k.content) AGAINST(? IN NATURAL LANGUAGE MODE)
+      AND MATCH(k.title, k.content) AGAINST(? IN ${mode} MODE)
     ORDER BY score DESC
     LIMIT 5
     `,
     [query, tenantId, query]
   );
+  return rows;
+}
+
+// "book keeping" → "book* keeping*" so word forms like "bookkeeping" / "books" match.
+// Operators typed by the user are stripped so they can't break the BOOLEAN query.
+function toPrefixQuery(query) {
+  return query
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(w => w.length >= 4)
+    .map(w => `${w}*`)
+    .join(" ");
+}
+
+// 🔎 SEARCH
+async function searchKnowledge(query, tenantId) {
+  if (!query || !tenantId) return [];
+
+  let rows = await matchKnowledge(query, tenantId, "NATURAL LANGUAGE");
+
+  if (!rows.length) {
+    const prefixQuery = toPrefixQuery(query);
+    if (prefixQuery) rows = await matchKnowledge(prefixQuery, tenantId, "BOOLEAN");
+  }
 
 let filteredRows = rows;
 
@@ -64,6 +86,27 @@ for (const row of filteredRows) {
     delete item._fileSet;
     return item;
   });
+}
+
+// Unicode-aware, so non-Latin words aren't stripped to nothing
+const toWords = text =>
+  String(text || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+// 🔎 SEARCH + keyword safety: keep docs sharing at least one real (3+ letter) word with the query
+async function findRelevantKnowledge(query, tenantId, relevanceText = query) {
+  const results = await searchKnowledge(query, tenantId);
+  const queryWords = toWords(relevanceText).filter(w => w.length >= 3);
+
+  const isRelevant = text => {
+    const t = toWords(text).join(" ");
+    return queryWords.some(word => t.includes(word));
+  };
+
+  return results.filter(r => isRelevant(r.title) || isRelevant(r.content));
 }
 
 
@@ -178,6 +221,7 @@ async function deleteKnowledge(id, tenantId) {
 
 module.exports = {
   searchKnowledge,
+  findRelevantKnowledge,
   addKnowledge,
   getAllKnowledge,
   getKnowledgeById,

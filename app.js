@@ -29,6 +29,19 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 // Other routes
 app.use("/api/tickets", require("./routes/ticket.routes"));
 
+// Errors that reach Express (e.g. upload too large, DB down while resolving the tenant)
+// get a JSON body instead of the default HTML page with a stack trace
+app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({ text: "The file is too large. Please attach a file under 10 MB." });
+  }
+  if (err.name === "MulterError") {
+    return res.status(400).json({ text: "Please attach a single PDF or image file." });
+  }
+
+  console.error("UNHANDLED ERROR:", err.message);
+  res.status(err.status || 500).json({ text: "System error ⚠️" });
+});
 
 
 module.exports = app;
